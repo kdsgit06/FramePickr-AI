@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 
-const BACKEND = process.env.VITE_API_BASE_URL || "https://framepickr-backend.onrender.com";
+const API_BASE = process.env.VITE_API_BASE_URL || "https://framepickr-backend.onrender.com";
 
 function App() {
   const [files, setFiles] = useState([]);
@@ -18,14 +18,16 @@ function App() {
     files.forEach((f) => form.append("files", f, f.name));
 
     try {
-      const res = await axios.post(`${BACKEND}/score_and_save?top_n=5`, form, {
+      const res = await axios.post(`${API_BASE}/score_and_save?top_n=5`, form, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120000,
       });
       setResults(res.data);
+      // scroll to top so user sees results
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
-      console.error(err);
-      const msg = err.response?.data?.detail || err.response?.data || err.message;
+      console.error("Upload error:", err);
+      const msg = err.response?.data?.detail || err.response?.data?.error || err.message || "Network Error";
       alert("Error: " + msg);
     } finally {
       setLoading(false);
@@ -39,18 +41,7 @@ function App() {
 
       <input type="file" multiple accept="image/*" onChange={onFiles} />
       <div style={{ marginTop: 12 }}>
-        <button
-          onClick={submit}
-          disabled={loading}
-          style={{
-            padding: "10px 18px",
-            borderRadius: 8,
-            background: "#111",
-            color: "#fff",
-            border: "1px solid #333",
-            cursor: loading ? "not-allowed" : "pointer",
-          }}
-        >
+        <button onClick={submit} disabled={loading} style={{ padding: "10px 18px", borderRadius: 8 }}>
           {loading ? "Processing..." : "Upload & Score"}
         </button>
       </div>
@@ -59,69 +50,69 @@ function App() {
         <div style={{ marginTop: 20 }}>
           <h2>Top Results</h2>
 
+          {/* Ranked list */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-            {results.top.map((t, idx) => (
+            {results.top && results.top.length === 0 && <div>No scored images found.</div>}
+
+            {results.top?.map((t, idx) => (
               <div
-                key={t.filename + (t.saved_as || "")}
+                key={(t.filename || "") + (t.saved_as || idx)}
                 style={{
                   border: "1px solid #444",
                   padding: 12,
                   display: "flex",
                   gap: 12,
                   alignItems: "center",
-                  background: "#0f0f0f",
-                  borderRadius: 6,
+                  background: "#1b1b1b",
                 }}
               >
                 <div style={{ width: 160, minHeight: 100 }}>
                   {t.url ? (
                     <img
-                      src={`${BACKEND}${t.url}`}
+                      src={`${API_BASE}${t.url}`}
                       alt={t.filename}
-                      style={{ width: 160, height: 100, objectFit: "cover", borderRadius: 4 }}
+                      style={{ width: 160, height: "auto", objectFit: "cover", display: "block" }}
+                      onError={(e) => {
+                        e.currentTarget.style.opacity = 0.6;
+                        e.currentTarget.alt = "Preview not available";
+                      }}
                     />
                   ) : (
-                    <div style={{ width: 160, height: 100, background: "#222", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 4 }}>
+                    <div style={{ width: 160, height: 120, background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
                       No preview
                     </div>
                   )}
                 </div>
 
                 <div style={{ flex: 1, textAlign: "left" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <div style={{ fontWeight: 700, fontSize: 16 }}>
-                      #{idx + 1} — {t.filename}
-                    </div>
-                    <div style={{ fontWeight: 700, color: "#9ad" }}>{t.score != null ? Number(t.score).toFixed(2) : "-"}</div>
-                  </div>
-
-                  <div style={{ marginTop: 6, color: "#bbb", fontSize: 14 }}>
-                    <span>Sharpness: {t.sharpness != null ? Number(t.sharpness).toFixed(2) : "-"}</span>
-                    <span style={{ marginLeft: 12 }}>Brightness: {t.brightness != null ? Number(t.brightness).toFixed(2) : "-"}</span>
-                    <span style={{ marginLeft: 12 }}>Faces: {t.faces ?? 0}</span>
+                  <div style={{ fontWeight: 700 }}>{t.filename}</div>
+                  <div style={{ marginTop: 6 }}>Score: <strong>{t.score ?? "-"}</strong></div>
+                  <div style={{ marginTop: 4, opacity: 0.9 }}>
+                    Sharpness: {t.sharpness ?? "-"} | Brightness: {t.brightness ?? "-"} | Faces: {t.faces ?? "-"}
                   </div>
 
                   {t.url && (
                     <div style={{ marginTop: 8 }}>
-                      <a href={`${BACKEND}${t.url}`} target="_blank" rel="noreferrer" style={{ color: "#79f" }}>
+                      <a href={`${API_BASE}${t.url}`} target="_blank" rel="noreferrer" style={{ color: "#6ea0ff" }}>
                         Open
                       </a>{" "}
                       |{" "}
-                      <a href={`${BACKEND}${t.url}`} download style={{ color: "#79f" }}>
+                      <a href={`${API_BASE}${t.url}`} download style={{ color: "#6ea0ff" }}>
                         Download
                       </a>
                     </div>
                   )}
                 </div>
+
+                <div style={{ width: 60, textAlign: "center", color: "#ccc" }}>
+                  <div style={{ fontSize: 18, fontWeight: 700 }}>{idx + 1}</div>
+                  <div style={{ fontSize: 12, opacity: 0.8 }}>rank</div>
+                </div>
               </div>
             ))}
           </div>
 
-          {/* If you want debugging later: toggle this manually during development */}
-          {/* <details style={{ marginTop: 18 }}>
-            <summary style={{ cursor: "pointer" }}>Show raw response (debug)</summary>
-            <pre style={{ background: "#111", padding: 10, color: "#ddd", overflowX: "auto" }}>{JSON.stringify(results, null, 2)}</pre>
-          </details> */}
+          {/* Optional: show small debug summary (collapsed by default). Hidden now. */}
         </div>
       )}
     </div>
