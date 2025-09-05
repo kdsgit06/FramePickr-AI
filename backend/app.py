@@ -1,25 +1,29 @@
-﻿import os
+﻿# backend/app.py
+import os
 import uuid
 import traceback
-import sys
-from fastapi import FastAPI, UploadFile, File, Query, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, Response
-import uvicorn
-from model.scoring import compute_score
-import cv2
+from io import BytesIO
 
-# downloader helper
+from fastapi import FastAPI, UploadFile, File, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
+import uvicorn
+import cv2
+from PIL import Image
+
+from model.scoring import compute_score
 from model.download_haarcascade import download_haarcascade
 
+# ------- paths -------
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "model")
 CASCADE_PATH = os.path.join(MODEL_DIR, "haarcascade_frontalface_default.xml")
 UPLOADS_DIR = os.path.join(BASE_DIR, "..", "uploads")  # project_root/uploads
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
 
-# ensure cascade is available
+# ------- ensure cascade -------
 if not os.path.exists(CASCADE_PATH):
     print("Haarcascade not found locally. Downloading now...", flush=True)
     try:
@@ -33,9 +37,10 @@ face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 if face_cascade.empty():
     raise RuntimeError(f"Failed to load Haarcascade XML from {CASCADE_PATH}")
 
-app = FastAPI(title="FramePickr AI - Scoring API (defensive)")
+# ------- app -------
+app = FastAPI(title="FramePickr AI - Scoring API")
 
-# standard CORS middleware
+# DEV: open CORS for local/frontend testing. Restrict in production.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -44,102 +49,114 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# fallback middleware to ensure CORS headers always present
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    if request.method == "OPTIONS":
-        headers = {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-            "Access-Control-Allow-Headers": "*, Authorization, Content-Type",
-        }
-        return Response(status_code=200, headers=headers)
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    return response
+# ------- helpers -------
+def compress_image_bytes_if_needed(image_bytes: bytes, max_kb: int = 700) -> bytes:
+    """
+    If image size (in KB) is larger than max_kb, compress by lowering JPEG quality.
+    Returns bytes (possibly unchanged).
+    """
+    try:
+        size_kb = len(image_bytes) / 1024
+        if size_kb <= max_kb:
+            return image_bytes
 
-# --- small helpers ---
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB limit per file (adjust if needed)
+        img = Image.open(BytesIO(image_bytes)).convert("RGB")
+        quality = 85
+        last_data = image_bytes
+        while quality >= 30:
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            data = buf.getvalue()
+            last_data = data
+            if len(data) / 1024 <= max_kb:
+                return data
+            quality -= 10
+        return last_data
+    except Exception:
+        # on any error, fallback to original bytes
+        return image_bytes
 
-def log_exception(e: Exception):
-    # print full traceback to stdout so Render logs show it
-    print("Exception:", str(e), file=sys.stderr, flush=True)
-    traceback.print_exc(file=sys.stderr)
+def safe_compute_score(image_bytes: bytes):
+    """
+    Wrap compute_score and return structured error if something goes wrong.
+    IMPORTANT: compute_score signature expected: compute_score(image_bytes, face_cascade)
+    """
+    try:
+        return compute_score(image_bytes, face_cascade)
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": "scoring_failed", "detail": str(e)}
 
-# endpoints
+# ------- endpoints -------
 @app.post("/score")
 async def score_images(files: list[UploadFile] = File(...), top_n: int = Query(3, ge=1, le=20)):
-    try:
-        results = []
-        for f in files:
-            contents = await f.read()
-            if len(contents) > MAX_UPLOAD_BYTES:
-                return JSONResponse({"error": "file_too_large", "detail": f"{f.filename} exceeds {MAX_UPLOAD_BYTES} bytes"}, status_code=413)
-            res = compute_score(contents, face_cascade)
+    results = []
+    for f in files:
+        contents = await f.read()
+        # compress for scoring to avoid timeouts/memory spikes
+        scoring_bytes = compress_image_bytes_if_needed(contents, max_kb=700)
+        res = safe_compute_score(scoring_bytes)
+        if isinstance(res, dict):
             res["filename"] = f.filename
-            results.append(res)
+        results.append(res)
 
-        sorted_results = sorted([r for r in results if "score" in r], key=lambda x: x["score"], reverse=True)
-        top = sorted_results[:top_n]
-        return JSONResponse({"count": len(results), "top": top, "all": results})
-    except Exception as e:
-        log_exception(e)
-        return JSONResponse({"error": "internal_server_error", "detail": str(e)}, status_code=500)
+    scored = [r for r in results if isinstance(r, dict) and "score" in r]
+    sorted_results = sorted(scored, key=lambda x: x["score"], reverse=True)
+    top = sorted_results[:top_n]
+    return JSONResponse({"count": len(results), "top": top, "all": results})
+
 
 @app.post("/score_and_save")
 async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query(3, ge=1, le=20)):
-    """
-    Defensive: validate sizes, log exceptions, return helpful error messages.
-    """
-    try:
-        results = []
-        file_bytes_list = []
+    results = []
+    file_bytes_list = []  # keep raw bytes to save later
 
-        for f in files:
-            contents = await f.read()
-            if len(contents) > MAX_UPLOAD_BYTES:
-                return JSONResponse({"error": "file_too_large", "detail": f"{f.filename} exceeds {MAX_UPLOAD_BYTES} bytes"}, status_code=413)
-            file_bytes_list.append((f.filename, contents))
-            # compute_score may raise — we'll catch below
-            res = compute_score(contents, face_cascade)
+    for f in files:
+        contents = await f.read()
+        file_bytes_list.append((f.filename, contents))
+        scoring_bytes = compress_image_bytes_if_needed(contents, max_kb=700)
+        res = safe_compute_score(scoring_bytes)
+        if isinstance(res, dict):
             res["filename"] = f.filename
-            results.append(res)
+        results.append(res)
 
-        sorted_results = sorted([r for r in results if "score" in r], key=lambda x: x["score"], reverse=True)
-        top = sorted_results[:top_n]
+    scored = [r for r in results if isinstance(r, dict) and "score" in r]
+    sorted_results = sorted(scored, key=lambda x: x["score"], reverse=True)
+    top = sorted_results[:top_n]
 
-        saved = []
-        for item in top:
-            match = next((b for (name, b) in file_bytes_list if name == item["filename"]), None)
-            if match is None:
-                continue
-            ext = os.path.splitext(item["filename"])[1] or ".jpg"
-            unique_name = f"{uuid.uuid4().hex}{ext}"
-            save_path = os.path.join(UPLOADS_DIR, unique_name)
+    # Save top images (use original bytes for best quality)
+    saved = []
+    for item in top:
+        match = next((b for (name, b) in file_bytes_list if name == item.get("filename")), None)
+        if match is None:
+            continue
+        ext = os.path.splitext(item.get("filename", ""))[1] or ".jpg"
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        save_path = os.path.join(UPLOADS_DIR, unique_name)
+        try:
             with open(save_path, "wb") as out:
                 out.write(match)
-            item["url"] = f"/uploads/{unique_name}"
-            saved.append({"filename": item["filename"], "saved_as": unique_name, "url": item["url"], "score": item["score"]})
+        except Exception as e:
+            traceback.print_exc()
+            continue
+        item["url"] = f"/uploads/{unique_name}"
+        saved.append({
+            "filename": item.get("filename"),
+            "saved_as": unique_name,
+            "url": item["url"],
+            "score": item.get("score")
+        })
 
-        return JSONResponse({"count": len(results), "top": top, "all": results, "saved": saved})
-    except Exception as e:
-        log_exception(e)
-        # include short message but avoid leaking internals
-        return JSONResponse({"error": "internal_server_error", "detail": str(e)}, status_code=500)
+    return JSONResponse({"count": len(results), "top": top, "all": results, "saved": saved})
+
 
 @app.get("/uploads/{file_name}")
 async def serve_upload(file_name: str):
-    try:
-        path = os.path.join(UPLOADS_DIR, file_name)
-        if not os.path.exists(path):
-            return JSONResponse({"error": "file_not_found"}, status_code=404)
-        # FileResponse will be returned; middleware will attach CORS headers
-        return FileResponse(path)
-    except Exception as e:
-        log_exception(e)
-        return JSONResponse({"error": "internal_server_error"}, status_code=500)
+    path = os.path.join(UPLOADS_DIR, file_name)
+    if not os.path.exists(path):
+        return JSONResponse({"error": "file_not_found"}, status_code=404)
+    return FileResponse(path)
 
+# dev runner
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
