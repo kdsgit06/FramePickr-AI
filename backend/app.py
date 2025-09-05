@@ -9,6 +9,10 @@ import uvicorn
 from model.scoring import compute_score
 import cv2
 
+# new imports for compression
+from io import BytesIO
+from PIL import Image
+
 # downloader helper
 from model.download_haarcascade import download_haarcascade
 
@@ -33,7 +37,7 @@ face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 if face_cascade.empty():
     raise RuntimeError(f"Failed to load Haarcascade XML from {CASCADE_PATH}")
 
-app = FastAPI(title="FramePickr AI - Scoring API (defensive)")
+app = FastAPI(title="FramePickr AI - Scoring API (defensive + compress)")
 
 # standard CORS middleware
 app.add_middleware(
@@ -60,23 +64,81 @@ async def add_cors_headers(request: Request, call_next):
     response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     return response
 
-# --- small helpers ---
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB limit per file (adjust if needed)
+# --- helpers ---
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB limit per file (hard limit)
+TARGET_BYTES = int(1.5 * 1024 * 1024)  # compress to ~1.5 MB target if bigger
+MAX_WIDTH = 2048  # if image is wider than this, resize proportionally
 
 def log_exception(e: Exception):
-    # print full traceback to stdout so Render logs show it
     print("Exception:", str(e), file=sys.stderr, flush=True)
     traceback.print_exc(file=sys.stderr)
 
-# endpoints
+def compress_image_bytes(img_bytes: bytes, target_bytes: int = TARGET_BYTES, max_width: int = MAX_WIDTH) -> bytes:
+    """
+    Compress image bytes using Pillow:
+      - open bytes, convert to RGB (if needed),
+      - if width > max_width, resize proportionally,
+      - save as JPEG with decreasing quality until under target_bytes or quality reaches 30.
+    Returns compressed bytes (or original if compression not needed/failed).
+    """
+    try:
+        # quick check: if already small, return as-is
+        if len(img_bytes) <= target_bytes:
+            return img_bytes
+
+        im = Image.open(BytesIO(img_bytes))
+        # convert to RGB to guarantee JPEG compatibility
+        if im.mode in ("RGBA", "LA"):
+            # drop alpha or convert to white background
+            background = Image.new("RGB", im.size, (255, 255, 255))
+            background.paste(im, mask=im.split()[-1])
+            im = background
+        else:
+            im = im.convert("RGB")
+
+        # resize if very wide
+        w, h = im.size
+        if w > max_width:
+            new_h = int(max_width * (h / w))
+            im = im.resize((max_width, new_h), Image.LANCZOS)
+
+        # try quality loop
+        quality = 85
+        while quality >= 30:
+            bio = BytesIO()
+            im.save(bio, format="JPEG", quality=quality, optimize=True)
+            data = bio.getvalue()
+            if len(data) <= target_bytes:
+                return data
+            quality -= 10
+
+        # if we exit loop, return best we have (last attempt)
+        return data
+    except Exception as e:
+        # if compression fails, log and return original bytes so scoring still runs
+        print("Compression failed:", e, file=sys.stderr, flush=True)
+        traceback.print_exc(file=sys.stderr)
+        return img_bytes
+
+# endpoints (defensive)
 @app.post("/score")
 async def score_images(files: list[UploadFile] = File(...), top_n: int = Query(3, ge=1, le=20)):
     try:
         results = []
         for f in files:
             contents = await f.read()
+            # if file too large to accept at all, reject
+            if len(contents) > (3 * MAX_UPLOAD_BYTES):
+                return JSONResponse({"error": "file_too_large", "detail": f"{f.filename} exceeds absolute limit"}, status_code=413)
+
+            # compress if bigger than target threshold
+            if len(contents) > TARGET_BYTES:
+                contents = compress_image_bytes(contents)
+
+            # still reject if it's larger than hard limit after compression
             if len(contents) > MAX_UPLOAD_BYTES:
-                return JSONResponse({"error": "file_too_large", "detail": f"{f.filename} exceeds {MAX_UPLOAD_BYTES} bytes"}, status_code=413)
+                return JSONResponse({"error": "file_too_large_after_compression", "detail": f"{f.filename} too large"}, status_code=413)
+
             res = compute_score(contents, face_cascade)
             res["filename"] = f.filename
             results.append(res)
@@ -90,19 +152,25 @@ async def score_images(files: list[UploadFile] = File(...), top_n: int = Query(3
 
 @app.post("/score_and_save")
 async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query(3, ge=1, le=20)):
-    """
-    Defensive: validate sizes, log exceptions, return helpful error messages.
-    """
     try:
         results = []
         file_bytes_list = []
 
         for f in files:
             contents = await f.read()
+            # absolute reject for massive files
+            if len(contents) > (3 * MAX_UPLOAD_BYTES):
+                return JSONResponse({"error": "file_too_large", "detail": f"{f.filename} exceeds absolute limit"}, status_code=413)
+
+            # compress if bigger than target
+            if len(contents) > TARGET_BYTES:
+                contents = compress_image_bytes(contents)
+
+            # reject if still too big
             if len(contents) > MAX_UPLOAD_BYTES:
-                return JSONResponse({"error": "file_too_large", "detail": f"{f.filename} exceeds {MAX_UPLOAD_BYTES} bytes"}, status_code=413)
+                return JSONResponse({"error": "file_too_large_after_compression", "detail": f"{f.filename} too large"}, status_code=413)
+
             file_bytes_list.append((f.filename, contents))
-            # compute_score may raise — we'll catch below
             res = compute_score(contents, face_cascade)
             res["filename"] = f.filename
             results.append(res)
@@ -126,7 +194,6 @@ async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query
         return JSONResponse({"count": len(results), "top": top, "all": results, "saved": saved})
     except Exception as e:
         log_exception(e)
-        # include short message but avoid leaking internals
         return JSONResponse({"error": "internal_server_error", "detail": str(e)}, status_code=500)
 
 @app.get("/uploads/{file_name}")
@@ -135,7 +202,6 @@ async def serve_upload(file_name: str):
         path = os.path.join(UPLOADS_DIR, file_name)
         if not os.path.exists(path):
             return JSONResponse({"error": "file_not_found"}, status_code=404)
-        # FileResponse will be returned; middleware will attach CORS headers
         return FileResponse(path)
     except Exception as e:
         log_exception(e)
