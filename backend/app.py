@@ -1,6 +1,6 @@
-﻿from fastapi import FastAPI, UploadFile, File, Query
+﻿from fastapi import FastAPI, UploadFile, File, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 import uvicorn
 import os
 from model.scoring import compute_score
@@ -23,7 +23,6 @@ if not os.path.exists(CASCADE_PATH):
     try:
         download_haarcascade(dest_dir=MODEL_DIR)
     except Exception as e:
-        # print error and re-raise so dev can see the issue
         print("Error downloading Haarcascade:", e)
     if not os.path.exists(CASCADE_PATH):
         raise FileNotFoundError(
@@ -33,19 +32,37 @@ if not os.path.exists(CASCADE_PATH):
 # Load cascade after ensuring it's present
 face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
 if face_cascade.empty():
-    # This rarely happens, but guard against a bad xml
     raise RuntimeError(f"Failed to load Haarcascade XML from {CASCADE_PATH}")
 
 app = FastAPI(title="FramePickr AI - Scoring API")
 
-# allow local frontend (Vite) to talk to backend
+# Standard CORSMiddleware (keeps original behavior)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # during development only; restrict in production
+    allow_origins=["*"],  # development/demo: allow all origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Fallback middleware: ensures Access-Control headers are always present
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    # Handle preflight OPTIONS early
+    if request.method == "OPTIONS":
+        headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+            "Access-Control-Allow-Headers": "*, Authorization, Content-Type",
+        }
+        return Response(status_code=200, headers=headers)
+
+    response = await call_next(request)
+    # Add CORS headers to every response as a fallback
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
+    return response
 
 @app.post("/score")
 async def score_images(files: list[UploadFile] = File(...), top_n: int = Query(3, ge=1, le=20)):
@@ -62,12 +79,8 @@ async def score_images(files: list[UploadFile] = File(...), top_n: int = Query(3
 
 @app.post("/score_and_save")
 async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query(3, ge=1, le=20)):
-    """
-    Scores uploaded images, saves the top_n images to uploads/ and returns JSON with local file URLs.
-    """
     results = []
-    file_bytes_list = []  # keep raw bytes to save later
-
+    file_bytes_list = []
     for f in files:
         contents = await f.read()
         file_bytes_list.append((f.filename, contents))
@@ -78,20 +91,16 @@ async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query
     sorted_results = sorted([r for r in results if "score" in r], key=lambda x: x["score"], reverse=True)
     top = sorted_results[:top_n]
 
-    # Save top images
     saved = []
     for item in top:
-        # find raw bytes for this filename (first match)
         match = next((b for (name, b) in file_bytes_list if name == item["filename"]), None)
         if match is None:
             continue
-        # unique filename to avoid collisions
         ext = os.path.splitext(item["filename"])[1] or ".jpg"
         unique_name = f"{uuid.uuid4().hex}{ext}"
         save_path = os.path.join(UPLOADS_DIR, unique_name)
         with open(save_path, "wb") as out:
             out.write(match)
-        # create a relative URL path (for local dev)
         item["url"] = f"/uploads/{unique_name}"
         saved.append({"filename": item["filename"], "saved_as": unique_name, "url": item["url"], "score": item["score"]})
 
@@ -99,9 +108,6 @@ async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query
 
 @app.get("/uploads/{file_name}")
 async def serve_upload(file_name: str):
-    """
-    Serves the saved files from uploads/ so the frontend can fetch them by URL.
-    """
     path = os.path.join(UPLOADS_DIR, file_name)
     if not os.path.exists(path):
         return JSONResponse({"error": "file_not_found"}, status_code=404)
