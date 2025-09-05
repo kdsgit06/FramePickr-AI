@@ -17,7 +17,9 @@ function App() {
     files.forEach((f) => form.append("files", f, f.name));
 
     try {
-      const res = await axios.post("http://127.0.0.1:8000/score_and_save?top_n=5", form, {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+      const res = await axios.post(`${API_BASE}/score_and_save?top_n=5`, form, {
+
         headers: { "Content-Type": "multipart/form-data" },
       });
       setResults(res.data);
@@ -49,7 +51,7 @@ function App() {
               <div key={t.filename} style={{ border: "1px solid #ddd", padding: 10, marginBottom: 8, display: "flex", gap: 12 }}>
                 <div>
                   {t.url ? (
-                    <img src={`http://127.0.0.1:8000${t.url}`} alt={t.filename} style={{ width: 160, height: "auto", objectFit: "cover" }} />
+                    <img src={`${API_BASE}${t.url}`} alt={t.filename} style={{ width: 160, height: "auto", objectFit: "cover" }} />
                   ) : (
                     <div style={{ width: 160, height: 120, background: "#eee", display: "flex", alignItems: "center", justifyContent: "center" }}>No preview</div>
                   )}
@@ -60,8 +62,9 @@ function App() {
                   <div>Sharpness: {t.sharpness} | Brightness: {t.brightness} | Faces: {t.faces}</div>
                   {t.url && (
                     <div style={{ marginTop: 8 }}>
-                      <a href={`http://127.0.0.1:8000${t.url}`} target="_blank" rel="noreferrer">Open</a>{" "}
-                      | <a href={`http://127.0.0.1:8000${t.url}`} download>Download</a>
+                      <a href={`${API_BASE}${t.url}`} target="_blank">Open</a>
+
+                      | <a href={`${API_BASE}${t.url}`} download>Download</a>
                     </div>
                   )}
                 </div>
