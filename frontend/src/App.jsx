@@ -19,9 +19,12 @@ function App() {
     files.forEach((f) => form.append("files", f, f.name));
 
     try {
-      const res = await axios.post(`${API_BASE}/score_and_save?top_n=5`, form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await axios.post(
+  "https://framepickr-backend.onrender.com/score_and_save?top_n=5",
+  form,
+  { headers: { "Content-Type": "multipart/form-data" } }
+);
+
       setResults(res.data);
     } catch (err) {
       console.error(err);
