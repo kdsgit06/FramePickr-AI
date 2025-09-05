@@ -6,6 +6,8 @@ function App() {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+
   const onFiles = (e) => {
     setFiles(Array.from(e.target.files));
   };
@@ -17,9 +19,7 @@ function App() {
     files.forEach((f) => form.append("files", f, f.name));
 
     try {
-      const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
       const res = await axios.post(`${API_BASE}/score_and_save?top_n=5`, form, {
-
         headers: { "Content-Type": "multipart/form-data" },
       });
       setResults(res.data);
@@ -62,8 +62,7 @@ function App() {
                   <div>Sharpness: {t.sharpness} | Brightness: {t.brightness} | Faces: {t.faces}</div>
                   {t.url && (
                     <div style={{ marginTop: 8 }}>
-                      <a href={`${API_BASE}${t.url}`} target="_blank">Open</a>
-
+                      <a href={`${API_BASE}${t.url}`} target="_blank" rel="noreferrer">Open</a>{" "}
                       | <a href={`${API_BASE}${t.url}`} download>Download</a>
                     </div>
                   )}

@@ -7,6 +7,9 @@ from model.scoring import compute_score
 import cv2
 import uuid
 
+# Import the downloader helper to fetch the Haarcascade on-demand
+from model.download_haarcascade import download_haarcascade
+
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, "model")
 CASCADE_PATH = os.path.join(MODEL_DIR, "haarcascade_frontalface_default.xml")
@@ -14,10 +17,24 @@ UPLOADS_DIR = os.path.join(BASE_DIR, "..", "uploads")  # project_root/uploads
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
+# If cascade not present, download it
 if not os.path.exists(CASCADE_PATH):
-    raise FileNotFoundError(f"Haarcascade not found. Please run model/download_haarcascade.py or place the xml at {CASCADE_PATH}")
+    print("Haarcascade not found locally. Downloading now...")
+    try:
+        download_haarcascade(dest_dir=MODEL_DIR)
+    except Exception as e:
+        # print error and re-raise so dev can see the issue
+        print("Error downloading Haarcascade:", e)
+    if not os.path.exists(CASCADE_PATH):
+        raise FileNotFoundError(
+            f"Haarcascade not found and download failed. Expected at: {CASCADE_PATH}"
+        )
 
+# Load cascade after ensuring it's present
 face_cascade = cv2.CascadeClassifier(CASCADE_PATH)
+if face_cascade.empty():
+    # This rarely happens, but guard against a bad xml
+    raise RuntimeError(f"Failed to load Haarcascade XML from {CASCADE_PATH}")
 
 app = FastAPI(title="FramePickr AI - Scoring API")
 
@@ -75,7 +92,6 @@ async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query
         with open(save_path, "wb") as out:
             out.write(match)
         # create a relative URL path (for local dev)
-        # e.g., /uploads/<filename> — we'll make a route to serve this
         item["url"] = f"/uploads/{unique_name}"
         saved.append({"filename": item["filename"], "saved_as": unique_name, "url": item["url"], "score": item["score"]})
 
