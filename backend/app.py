@@ -100,7 +100,7 @@ def safe_compute_score(image_bytes: bytes):
     Wrap compute_score so exceptions are handled gracefully.
     """
     try:
-        return compute_score(image_bytes, face_cascade)
+        return compute_score(image_bytes, face_cascade, model_dir=MODEL_DIR)
     except Exception as e:
         # include traceback for dev logs, but return structured error for response
         traceback.print_exc()
