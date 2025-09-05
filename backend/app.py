@@ -5,9 +5,9 @@ import traceback
 from io import BytesIO
 import zipfile
 
-from fastapi import FastAPI, UploadFile, File, Query, HTTPException
+from fastapi import FastAPI, UploadFile, File, Query, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, Response
 import uvicorn
 import cv2
 
@@ -80,15 +80,17 @@ def compress_image_bytes_if_needed(image_bytes: bytes, max_kb: int = 700) -> byt
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
         # target reduce: keep decreasing quality until under max_kb or quality floor
         quality = 85
+        last_data = None
         while quality >= 30:
             buf = BytesIO()
             img.save(buf, format="JPEG", quality=quality, optimize=True)
             data = buf.getvalue()
+            last_data = data
             if len(data) / 1024 <= max_kb:
                 return data
             quality -= 10
         # if we couldn't get smaller enough with reasonable quality, return last attempt
-        return data
+        return last_data or image_bytes
     except Exception:
         # on any compression error, fallback to original bytes
         return image_bytes
@@ -109,6 +111,36 @@ def log_exception(e: Exception):
     print("Exception:", e, flush=True)
 
 # -----------------------
+# Small helper to always return JSONResponse with CORS header (helps browser)
+# -----------------------
+def json_ok(payload, status_code=200):
+    return JSONResponse(payload, status_code=status_code, headers={"Access-Control-Allow-Origin": "*"})
+
+# -----------------------
+# Explicit OPTIONS handlers (preflight)
+# -----------------------
+# These make sure preflight is answered even if hosting platform does weird HTML responses
+@app.options("/score_and_save")
+async def score_and_save_options():
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, *",
+        "Access-Control-Allow-Credentials": "true",
+    }
+    return Response(status_code=200, headers=headers)
+
+@app.options("/score")
+async def score_options():
+    headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, *",
+        "Access-Control-Allow-Credentials": "true",
+    }
+    return Response(status_code=200, headers=headers)
+
+# -----------------------
 # Endpoints
 # -----------------------
 @app.post("/score")
@@ -118,20 +150,24 @@ async def score_images(files: list[UploadFile] = File(...), top_n: int = Query(3
     """
     results = []
     for f in files:
-        contents = await f.read()
-        # compress if large (avoid timeouts/502s)
-        contents = compress_image_bytes_if_needed(contents, max_kb=700)
-        res = safe_compute_score(contents)
-        # attach original filename
-        if isinstance(res, dict):
-            res["filename"] = f.filename
-        results.append(res)
+        try:
+            contents = await f.read()
+            # compress if large (avoid timeouts/502s)
+            contents = compress_image_bytes_if_needed(contents, max_kb=700)
+            res = safe_compute_score(contents)
+            # attach original filename
+            if isinstance(res, dict):
+                res["filename"] = f.filename
+            results.append(res)
+        except Exception as e:
+            log_exception(e)
+            results.append({"error": "read_failed", "detail": str(e), "filename": getattr(f, "filename", None)})
 
     # sort by score when available
     scored = [r for r in results if isinstance(r, dict) and "score" in r]
     sorted_results = sorted(scored, key=lambda x: x["score"], reverse=True)
     top = sorted_results[:top_n]
-    return JSONResponse({"count": len(results), "top": top, "all": results})
+    return json_ok({"count": len(results), "top": top, "all": results})
 
 
 @app.post("/score_and_save")
@@ -144,7 +180,13 @@ async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query
     file_bytes_list = []  # keep raw bytes to save later
 
     for f in files:
-        contents = await f.read()
+        try:
+            contents = await f.read()
+        except Exception as e:
+            log_exception(e)
+            results.append({"error": "read_failed", "detail": str(e), "filename": getattr(f, "filename", None)})
+            continue
+
         # keep original raw bytes to save (we may save the original or compressed version)
         file_bytes_list.append((f.filename, contents))
         # compress for scoring (so scoring uses smaller image if needed)
@@ -181,7 +223,7 @@ async def score_and_save(files: list[UploadFile] = File(...), top_n: int = Query
             "score": item.get("score")
         })
 
-    return JSONResponse({"count": len(results), "top": top, "all": results, "saved": saved})
+    return json_ok({"count": len(results), "top": top, "all": results, "saved": saved})
 
 
 @app.get("/uploads/{file_name}")
@@ -191,9 +233,9 @@ async def serve_upload(file_name: str):
     """
     path = os.path.join(UPLOADS_DIR, file_name)
     if not os.path.exists(path):
-        return JSONResponse({"error": "file_not_found"}, status_code=404)
-    return FileResponse(path)
-
+        return JSONResponse({"error": "file_not_found"}, status_code=404, headers={"Access-Control-Allow-Origin": "*"})
+    # FileResponse will not remove CORS header added by middleware, but we add explicit header to be safe
+    return FileResponse(path, headers={"Access-Control-Allow-Origin": "*"})
 
 @app.get("/download_saved")
 async def download_saved(filenames: str = Query(..., description="Comma-separated saved filenames (example: uuid1.jpg,uuid2.jpg)")):
@@ -217,7 +259,8 @@ async def download_saved(filenames: str = Query(..., description="Comma-separate
                 zf.write(path, arcname=fname)
         buf.seek(0)
         headers = {
-            "Content-Disposition": f"attachment; filename=framepickr_selected.zip"
+            "Content-Disposition": f"attachment; filename=framepickr_selected.zip",
+            "Access-Control-Allow-Origin": "*",
         }
         return StreamingResponse(buf, media_type="application/zip", headers=headers)
     except HTTPException:
@@ -226,6 +269,18 @@ async def download_saved(filenames: str = Query(..., description="Comma-separate
         log_exception(e)
         raise HTTPException(status_code=500, detail="internal_server_error")
 
+# -----------------------
+# Global exception handlers (so browser receives JSON + CORS instead of HTML)
+# -----------------------
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse({"error": "http_error", "detail": exc.detail}, status_code=exc.status_code, headers={"Access-Control-Allow-Origin": "*"})
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # log to server console
+    traceback.print_exc()
+    return JSONResponse({"error": "server_error", "detail": str(exc)}, status_code=500, headers={"Access-Control-Allow-Origin": "*"})
 
 # -----------------------
 # Run (dev)
