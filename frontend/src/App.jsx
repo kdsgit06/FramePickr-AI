@@ -9,32 +9,54 @@ function App() {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  const onFiles = (e) => setFiles(Array.from(e.target.files || []));
+  const onFiles = (e) => {
+    setFiles(Array.from(e.target.files || []));
+    setResults(null); // clear previous results when new files chosen
+  };
 
   const submit = async () => {
     if (!files.length) return alert("Choose images first");
     setLoading(true);
-    setResults(null);
 
     const form = new FormData();
     files.forEach((f) => form.append("files", f, f.name));
 
     try {
-      const res = await axios.post(`${API_BASE}/score_and_save?top_n=5`, form, {
+      const url = `${API_BASE.replace(/\/$/, "")}/score_and_save?top_n=5`;
+      const res = await axios.post(url, form, {
         headers: { "Content-Type": "multipart/form-data" },
-        timeout: 60_000,
+        timeout: 120000,
       });
-      setResults(res.data);
-      // scroll to results
-      setTimeout(() => window.scrollTo({ top: 0, behavior: "smooth" }), 200);
+
+      // backend response shape: { count, top: [...], all: [...], saved: [...] }
+      if (res?.data) {
+        // normalize URLs in top[] so previews open correctly
+        const normalize = (item) => {
+          if (!item) return item;
+          let copy = { ...item };
+          if (copy.url) {
+            // url could be "/uploads/xxx.jpg" or full "https://..."
+            if (copy.url.startsWith("/")) {
+              copy._absolute_url = API_BASE.replace(/\/$/, "") + copy.url;
+            } else {
+              copy._absolute_url = copy.url;
+            }
+          }
+          return copy;
+        };
+
+        const top = (res.data.top || []).map(normalize);
+        const all = (res.data.all || []).map(normalize);
+
+        setResults({ ...res.data, top, all });
+        // scroll to results
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        alert("No data returned from backend");
+      }
     } catch (err) {
       console.error("Upload error:", err);
-      // helpful error message for devs & users
-      const msg =
-        err?.response?.data?.detail ||
-        err?.response?.data?.error ||
-        err?.message ||
-        "Network or server error";
+      const msg = err.response?.data?.detail || err.response?.data?.error || err.message;
       alert("Error: " + msg);
     } finally {
       setLoading(false);
@@ -55,9 +77,9 @@ function App() {
             padding: "10px 18px",
             borderRadius: 8,
             background: "#111",
-            border: "1px solid #333",
             color: "#fff",
-            cursor: loading ? "default" : "pointer",
+            border: "1px solid #333",
+            cursor: loading ? "not-allowed" : "pointer",
           }}
         >
           {loading ? "Processing..." : "Upload & Score"}
@@ -66,64 +88,40 @@ function App() {
 
       <div style={{ marginTop: 20 }}>
         <h2>Top Results</h2>
+        {results && results.top && results.top.length === 0 && <div>No scored images returned.</div>}
+        {!results && <div style={{ color: "#bbb" }}>No results yet — upload images to get ranked picks.</div>}
 
-        {!results && <div style={{ color: "#ccc" }}>No scored images found.</div>}
-
-        {results && (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
-              {results.top.length === 0 && <div style={{ color: "#ccc" }}>No scored images returned.</div>}
-              {results.top.map((t) => (
-                <div
-                  key={(t.saved_as || t.filename) + t.score}
-                  style={{ border: "1px solid #444", padding: 12, display: "flex", gap: 12, alignItems: "center" }}
-                >
-                  <div style={{ width: 160, minHeight: 100 }}>
-                    {t.url ? (
-                      <img
-                        src={`${API_BASE}${t.url}`}
-                        alt={t.filename}
-                        style={{ width: 160, height: 120, objectFit: "cover", borderRadius: 4 }}
-                      />
-                    ) : (
-                      <div style={{ width: 160, height: 120, background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                        No preview
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ flex: 1, textAlign: "left" }}>
-                    <div style={{ fontWeight: 700 }}>{t.filename}</div>
-                    <div style={{ marginTop: 6, fontSize: 14 }}>
-                      <strong>Score:</strong> {t.score ?? "—"}
+        {results?.top?.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+            {results.top.map((t, i) => (
+              <div key={t.filename + (t.saved_as || i)} style={{ border: "1px solid #444", padding: 12, display: "flex", gap: 12 }}>
+                <div style={{ width: 160, minHeight: 100 }}>
+                  {t._absolute_url ? (
+                    <img src={t._absolute_url} alt={t.filename} style={{ width: 160, height: "auto", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ width: 160, height: 120, background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      No preview
                     </div>
-                    <div style={{ fontSize: 13, color: "#bbb", marginTop: 6 }}>
-                      Sharpness: {t.sharpness ?? "—"} | Brightness: {t.brightness ?? "—"} | Faces: {t.faces ?? 0}
-                    </div>
-
-                    {t.url && (
-                      <div style={{ marginTop: 10 }}>
-                        <a href={`${API_BASE}${t.url}`} target="_blank" rel="noreferrer" style={{ color: "#7fcfff" }}>
-                          Open
-                        </a>{" "}
-                        |{" "}
-                        <a href={`${API_BASE}${t.url}`} download style={{ color: "#7fcfff" }}>
-                          Download
-                        </a>
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
-              ))}
-            </div>
-
-            {/* Optional: small "All results" summary (hidden by default) */}
-            {/* <details style={{marginTop: 16}}>
-              <summary style={{cursor: 'pointer'}}>View raw results</summary>
-              <pre style={{background: "#111", padding: 10, color: "#ddd", overflowX: "auto"}}>{JSON.stringify(results.all, null, 2)}</pre>
-            </details> */}
-          </>
+                <div style={{ flex: 1, textAlign: "left" }}>
+                  <div style={{ fontWeight: 700 }}>{t.filename}</div>
+                  <div>Score: {typeof t.score !== "undefined" ? t.score : "—"}</div>
+                  <div>
+                    Sharpness: {t.sharpness ?? "—"} | Brightness: {t.brightness ?? "—"} | Faces: {t.faces ?? "—"}
+                  </div>
+                  {t._absolute_url && (
+                    <div style={{ marginTop: 8 }}>
+                      <a href={t._absolute_url} target="_blank" rel="noreferrer">Open</a>{" "}
+                      | <a href={t._absolute_url} download>Download</a>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
+
       </div>
     </div>
   );
