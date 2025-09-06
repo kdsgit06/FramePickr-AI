@@ -12,8 +12,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-# somewhere after WORKDIR /app
-COPY backend/model /app/model
+
 
 
 # copy requirements first for better cache (relative to backend/ build context)
@@ -23,8 +22,14 @@ RUN pip install --upgrade pip
 RUN pip install -r /app/requirements.txt
 
 # copy app code from the backend/ directory (context)
-COPY . /app
+# somewhere after WORKDIR /app
 
+
+COPY requirements.txt /app/requirements.txt
+
+COPY model /app/model
+
+COPY . /app
 ENV PORT=8080
 EXPOSE 8080
 
