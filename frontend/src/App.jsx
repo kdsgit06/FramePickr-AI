@@ -2,7 +2,70 @@
 import React, { useState } from "react";
 import axios from "axios";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://framepickr-backend.onrender.com";
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "https://framepickr-backend-1083279422825.us-central1.run.app";
+
+function fileToImage(file) {
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = (e) => rej(e);
+      img.src = reader.result;
+    };
+    reader.onerror = rej;
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Resize + compress an image file in browser.
+ * - maxWidth: max pixel width (preserves aspect)
+ * - maxKB: target maximum size in KB (best-effort)
+ * Returns a Blob (JPEG)
+ */
+async function resizeAndCompress(file, { maxWidth = 1920, maxKB = 700, qualityStart = 0.92 } = {}) {
+  try {
+    const img = await fileToImage(file);
+    const canvas = document.createElement("canvas");
+
+    let width = img.width;
+    let height = img.height;
+    if (width > maxWidth) {
+      height = Math.round((maxWidth * height) / width);
+      width = maxWidth;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, width, height);
+
+    // Try with descending quality until we are under maxKB (or stop)
+    let quality = qualityStart;
+    let blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+    const maxBytes = maxKB * 1024;
+    while (blob && blob.size > maxBytes && quality > 0.3) {
+      quality -= 0.12;
+      blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+    }
+
+    // If still too big, scale down canvas further by 80% and retry once
+    if (blob && blob.size > maxBytes) {
+      const newWidth = Math.round(width * 0.8);
+      const newHeight = Math.round(height * 0.8);
+      canvas.width = newWidth;
+      canvas.height = newHeight;
+      ctx.drawImage(img, 0, 0, newWidth, newHeight);
+      blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+    }
+
+    return blob || file;
+  } catch (e) {
+    console.warn("resize failed, fallback to original file:", e);
+    return file;
+  }
+}
 
 function App() {
   const [files, setFiles] = useState([]);
@@ -11,31 +74,42 @@ function App() {
 
   const onFiles = (e) => {
     setFiles(Array.from(e.target.files || []));
-    setResults(null); // clear previous results when new files chosen
+    setResults(null);
   };
 
   const submit = async () => {
     if (!files.length) return alert("Choose images first");
     setLoading(true);
-
-    const form = new FormData();
-    files.forEach((f) => form.append("files", f, f.name));
-
     try {
+      // Resize/compress each file client-side
+      const processedFiles = await Promise.all(
+        files.map(async (f) => {
+          // If file already small (< 800 KB) skip resizing
+          if (f.size / 1024 <= 800) return f;
+          const blob = await resizeAndCompress(f, { maxWidth: 1600, maxKB: 700 });
+          // If blob is a Blob and not File, convert to File to preserve filename
+          if (blob instanceof Blob) {
+            const newFile = new File([blob], f.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
+            return newFile;
+          }
+          return f;
+        })
+      );
+
+      const form = new FormData();
+      processedFiles.forEach((f) => form.append("files", f, f.name));
+
       const url = `${API_BASE.replace(/\/$/, "")}/score_and_save?top_n=5`;
       const res = await axios.post(url, form, {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 120000,
       });
 
-      // backend response shape: { count, top: [...], all: [...], saved: [...] }
       if (res?.data) {
-        // normalize URLs in top[] so previews open correctly
         const normalize = (item) => {
           if (!item) return item;
           let copy = { ...item };
           if (copy.url) {
-            // url could be "/uploads/xxx.jpg" or full "https://..."
             if (copy.url.startsWith("/")) {
               copy._absolute_url = API_BASE.replace(/\/$/, "") + copy.url;
             } else {
@@ -47,9 +121,7 @@ function App() {
 
         const top = (res.data.top || []).map(normalize);
         const all = (res.data.all || []).map(normalize);
-
         setResults({ ...res.data, top, all });
-        // scroll to results
         window.scrollTo({ top: 0, behavior: "smooth" });
       } else {
         alert("No data returned from backend");
@@ -121,7 +193,6 @@ function App() {
             ))}
           </div>
         )}
-
       </div>
     </div>
   );
