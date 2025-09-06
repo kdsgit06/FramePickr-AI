@@ -1,79 +1,83 @@
-# FramePickr AI — Intelligent Frame Selection
+# 📸 FramePickr AI
 
-**FramePickr AI** automatically scores and ranks photos to help photographers and editors pick the best frames quickly. It computes simple, explainable image metrics (sharpness, brightness, face count) and ranks images so you can pick the top frames from a batch in seconds.
+**FramePickr AI** is an AI-powered photo selection tool that automatically **scores, ranks, and saves the best frames** from a batch of images.  
+It uses **OpenCV** for scoring (sharpness, brightness, face/eyes/smile detection) and integrates with **Google Cloud Storage** for persistent uploads.  
 
----
-
-## Why I built this
-Photographers often shoot hundreds of images per session. Manually reviewing all of them is slow and error-prone. FramePickr applies a lightweight, deterministic scoring pipeline to highlight the best candidates — a useful time-saver during culls and quick-turn edits.
+🚀 **Live Demo:** [https://frame-pickr-ai.vercel.app](https://frame-pickr-ai.vercel.app)  
 
 ---
 
-## Features
-- Upload multiple images at once
-- Compute per-image metrics: sharpness, brightness, face count
-- Rank images by a combined score
-- Save and serve top selected images
-- Simple React UI for preview and download
-- Safe defaults for remote deployment (compresses large uploads to avoid crashes)
+## ✨ Features
+- 📂 Upload multiple images at once (drag & drop or file picker)  
+- ⚡ AI-based scoring for:
+  - Sharpness
+  - Brightness
+  - Face detection
+  - Eye & smile detection  
+- 🔝 Automatically selects **top-N ranked images**  
+- ☁️ Saves best picks to **Google Cloud Storage** and returns public URLs  
+- 🎨 Minimal, dark-themed UI with responsive design  
+- 🌍 Full-stack deployment:
+  - **Backend:** FastAPI + Uvicorn → Google Cloud Run
+  - **Frontend:** React + Vite → Vercel  
 
 ---
 
-## Tech stack
-- **Frontend**: React (Vite), Axios
-- **Backend**: FastAPI, Uvicorn
-- **Image processing**: OpenCV, Pillow
-- **Storage**: Local uploads folder (can swap to cloud storage)
-- **Deploy**: Render / Vercel tested
+## 🛠️ Tech Stack
+**Frontend:** React (Vite), Custom CSS  
+**Backend:** FastAPI (Python), OpenCV, Pillow  
+**Storage:** Google Cloud Storage  
+**Deployment:** Cloud Run (backend), Vercel (frontend)  
 
 ---
 
-## Quick start (local)
+## 🚀 Getting Started
 
-1. Clone:
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/kdsgit06/FramePickr-AI.git
+git clone https://github.com/YOUR_USERNAME/FramePickr-AI.git
 cd FramePickr-AI
-Backend (Python):
-
+2. Backend Setup
 bash
 Copy code
 cd backend
-python -m venv .venv
-# Activate the venv (PowerShell):
-# .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+
+# Run locally
 uvicorn app:app --reload --port 8000
-Frontend:
+Environment variables required:
 
 bash
 Copy code
-cd ../frontend
+GCS_BUCKET=<your-bucket-name>
+GCS_BASE_URL=https://storage.googleapis.com
+3. Frontend Setup
+bash
+Copy code
+cd frontend
 npm install
-# optionally create .env with VITE_API_BASE_URL=http://127.0.0.1:8000
 npm run dev
-Open http://localhost:5173 to use the UI.
+Set .env file:
 
-Deploy notes
-Backend: Render or similar; make sure the model/haarcascade_frontalface_default.xml is present or let the server download it on first run.
+ini
+Copy code
+VITE_API_BASE_URL=https://<your-cloud-run-service-url>
+4. Deployment
+Backend → Google Cloud Build + Cloud Run
 
-Frontend: Vercel or Netlify. Set VITE_API_BASE_URL to your backend URL in production.
+Frontend → Vercel (VITE_API_BASE_URL must be set in Vercel Environment Variables)
 
-Troubleshooting & tips
-CORS errors: The backend includes permissive CORS for development. If you see No 'Access-Control-Allow-Origin' header, confirm the correct backend is called and the backend is deployed with the latest code.
+📷 Screenshots
+Add screenshots of your app here for better presentation (upload to docs/screenshots/).
 
-502 / memory issues on Render: Large uploads can cause timeouts or memory spikes. Use small images for testing (under ~1MB), or raise instance size. The backend compresses large uploads before scoring to reduce risk.
+📌 Roadmap
+ Drag-and-drop upload UI
 
-No previews: Backend must return url for saved files. Confirm /uploads/<filename> returns 200 in the browser.
+ Advanced scoring breakdown (histograms, exposure)
 
-Next improvements (ideas)
-Better face / expression detection (deep learning model)
+ Authentication for user-specific uploads
 
-Smart sampling for burst photos / video frame selection
+ Batch export of top results
 
-Cloud storage (S3, Cloudinary) for saved images
-
-User accounts & annotations
-
-Contact
-I built this as a practical demo of building a compact ML + web app pipeline. If you want to try improvements or help with UI polishing, open an issue or submit a PR.
+🧑‍💻 Author
+Built with ❤️ by Subhash K
