@@ -1,4 +1,4 @@
-# FramePickr AI 🎞️✨
+# FramePickr AI 🎞️
 > Upload a batch of photos → get the **best frames ranked automatically** using AI heuristics (sharpness, brightness, faces). Download full-resolution originals instantly.
 
 ---
@@ -29,8 +29,10 @@ I built this project to:
 
 ## 🖼️ Visual Demo
 <!-- Add your screenshots/GIFs here -->
-![Upload Flow](screenshots/upload.png)
-![Ranked Results](screenshots/results.png)
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/542ac77a-f172-4ddc-ad78-bffdb6fc6a4a" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/93bb1338-c927-487c-8f85-6d45830aee1f" />
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/1b793f76-8877-4c2d-8ff9-4871267d7a40" />
+
 
 📺 **Loom Video Walkthrough (2 min):**  
 [![Watch the demo](screenshots/demo-thumbnail.png)](https://www.loom.com/share/your-video-id)
