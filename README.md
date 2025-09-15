@@ -1,83 +1,129 @@
-# 📸 FramePickr AI
-
-**FramePickr AI** is an AI-powered photo selection tool that automatically **scores, ranks, and saves the best frames** from a batch of images.  
-It uses **OpenCV** for scoring (sharpness, brightness, face/eyes/smile detection) and integrates with **Google Cloud Storage** for persistent uploads.  
-
-🚀 **Live Demo:** [https://frame-pickr-ai.vercel.app](https://frame-pickr-ai.vercel.app)  
+# FramePickr AI 🎞️✨
+> Upload a batch of photos → get the **best frames ranked automatically** using AI heuristics (sharpness, brightness, faces). Download full-resolution originals instantly.
 
 ---
 
-## ✨ Features
-- 📂 Upload multiple images at once (drag & drop or file picker)  
-- ⚡ AI-based scoring for:
-  - Sharpness
-  - Brightness
-  - Face detection
-  - Eye & smile detection  
-- 🔝 Automatically selects **top-N ranked images**  
-- ☁️ Saves best picks to **Google Cloud Storage** and returns public URLs  
-- 🎨 Minimal, dark-themed UI with responsive design  
-- 🌍 Full-stack deployment:
-  - **Backend:** FastAPI + Uvicorn → Google Cloud Run
-  - **Frontend:** React + Vite → Vercel  
+## 🚀 Highlights
+- 📸 **Automatic Photo Ranking** — scores images on sharpness, brightness, faces, eyes, smiles.  
+- ⚡ **Smart Compression** — compresses for scoring to prevent backend overload.  
+- 🗂️ **Originals Preserved** — always downloads full-quality files.  
+- 🎨 **Elegant UI** — React + Vite frontend with gold/grey theme, rank badges, clear CTAs.  
+- ☁️ **Deployable** — Vercel (frontend) + Cloud Run/Render (backend).  
+- 🧰 **Portfolio-Ready** — full-stack, computer vision, deployment.
+
+---
+
+## 📖 Project Overview
+Selecting the best shot out of hundreds of photos is tedious.  
+**FramePickr AI** solves this by automatically ranking your uploaded images based on visual quality.
+
+I built this project to:
+- Learn **full-stack engineering** (React + FastAPI).  
+- Implement **computer vision scoring** with OpenCV.  
+- Practice **deployment workflows** (Vercel + Cloud Run).  
+- Showcase my ability to debug real-world issues and ship a polished MVP.
+
+👉 *Motivation:* I wanted a project that’s both **practical** and **resume-ready**, something a recruiter can try live in 30 seconds.
+
+---
+
+## 🖼️ Visual Demo
+<!-- Add your screenshots/GIFs here -->
+![Upload Flow](screenshots/upload.png)
+![Ranked Results](screenshots/results.png)
+
+📺 **Loom Video Walkthrough (2 min):**  
+[![Watch the demo](screenshots/demo-thumbnail.png)](https://www.loom.com/share/your-video-id)
 
 ---
 
 ## 🛠️ Tech Stack
-**Frontend:** React (Vite), Custom CSS  
-**Backend:** FastAPI (Python), OpenCV, Pillow  
-**Storage:** Google Cloud Storage  
-**Deployment:** Cloud Run (backend), Vercel (frontend)  
+- **Frontend:** React + Vite, CSS (custom theme)  
+- **Backend:** FastAPI (Python), Uvicorn  
+- **Computer Vision:** OpenCV (sharpness, Haar cascades)  
+- **Storage:** Local uploads / Google Cloud Storage  
+- **Deployment:** Vercel (frontend), Docker + Cloud Run / Render (backend)
 
 ---
 
-## 🚀 Getting Started
+## ✨ Features
+- Upload multiple images at once  
+- Automatic scoring (sharpness, brightness, faces, eyes, smiles)  
+- Top results displayed with **rank badges (#1, #2, …)**  
+- Modal preview with Open / Download links  
+- Downloads are always **original quality**  
+- Elegant gold/grey UI with logo + CTA instructions  
 
-### 1. Clone the Repository
+---
+
+## 🔗 Live Demo
+- 🌐 Frontend (Vercel): [https://framepickr-ai.vercel.app](https://framepickr-ai.vercel.app)  
+- ⚙️ Backend (FastAPI docs): [https://your-backend-url/docs](https://your-backend-url/docs)  
+
+---
+
+## 🧑‍💻 Installation & Setup
+
+### Prerequisites
+- Node.js (>=18) + npm  
+- Python 3.10+  
+- Git  
+
+### Backend (FastAPI)
 ```bash
-git clone https://github.com/YOUR_USERNAME/FramePickr-AI.git
-cd FramePickr-AI
-2. Backend Setup
-bash
-Copy code
-cd backend
+# clone repo and enter backend folder
+git clone https://github.com/yourusername/FramePickr-AI.git
+cd FramePickr-AI/app
+
+# create virtual env + install deps
+python -m venv .venv
+source .venv/bin/activate   # (Windows: .venv\Scripts\activate)
 pip install -r requirements.txt
 
-# Run locally
-uvicorn app:app --reload --port 8000
-Environment variables required:
+# run server
+uvicorn app.main:app --reload --port 8000
+Backend runs at http://127.0.0.1:8000.
 
+Frontend (React + Vite)
 bash
 Copy code
-GCS_BUCKET=<your-bucket-name>
-GCS_BASE_URL=https://storage.googleapis.com
-3. Frontend Setup
-bash
-Copy code
-cd frontend
+cd ../frontend
 npm install
-npm run dev
-Set .env file:
+VITE_API_BASE_URL=http://127.0.0.1:8000 npm run dev
+Frontend runs at http://127.0.0.1:5173.
 
-ini
-Copy code
-VITE_API_BASE_URL=https://<your-cloud-run-service-url>
-4. Deployment
-Backend → Google Cloud Build + Cloud Run
+📂 Usage
+Open frontend in browser.
 
-Frontend → Vercel (VITE_API_BASE_URL must be set in Vercel Environment Variables)
+Select multiple images.
 
-📷 Screenshots
-Add screenshots of your app here for better presentation (upload to docs/screenshots/).
+Click Upload & Score.
 
-📌 Roadmap
- Drag-and-drop upload UI
+View ranked results (#1, #2, …).
 
- Advanced scoring breakdown (histograms, exposure)
+Open or Download full-quality originals.
 
- Authentication for user-specific uploads
+🐞 Key Challenges Solved
+Bug: downloads were tiny (~150KB).
+Fix: save original bytes, compress only for scoring.
 
- Batch export of top results
+Bug: CORS errors on Vercel.
+Fix: configured CORSMiddleware with frontend origin.
 
-🧑‍💻 Author
-Built with ❤️ by Subhash K
+Bug: syntax error (Unexpected token) in React.
+Fix: closed braces correctly in App.jsx.
+
+📊 Future Improvements
+Replace Haar cascades with modern detectors (Mediapipe, RetinaFace).
+
+Add ML model for photo aesthetics.
+
+Add drag & drop upload.
+
+Multi-user support with auth.
+
+Track downloads/session metrics.
+
+📜 License
+MIT License — free to use and modify.
+
