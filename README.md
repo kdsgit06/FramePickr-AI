@@ -1,4 +1,4 @@
-# FramePickr AI 🎞️
+# FramePickr AI 🎞️ -live : https://frame-pickr-ai.vercel.app/
 > Upload a batch of photos → get the **best frames ranked automatically** using AI heuristics (sharpness, brightness, faces). Download full-resolution originals instantly.
 
 ---
@@ -33,10 +33,6 @@ I built this project to:
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/93bb1338-c927-487c-8f85-6d45830aee1f" />
 <img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/1b793f76-8877-4c2d-8ff9-4871267d7a40" />
 
-
-📺 **Loom Video Walkthrough (2 min):**  
-[![Watch the demo](screenshots/demo-thumbnail.png)](https://www.loom.com/share/your-video-id)
-
 ---
 
 ## 🛠️ Tech Stack
@@ -55,13 +51,6 @@ I built this project to:
 - Modal preview with Open / Download links  
 - Downloads are always **original quality**  
 - Elegant gold/grey UI with logo + CTA instructions  
-
----
-
-## 🔗 Live Demo
-- 🌐 Frontend (Vercel): [https://framepickr-ai.vercel.app](https://framepickr-ai.vercel.app)  
-- ⚙️ Backend (FastAPI docs): [https://your-backend-url/docs](https://your-backend-url/docs)  
-
 ---
 
 ## 🧑‍💻 Installation & Setup
